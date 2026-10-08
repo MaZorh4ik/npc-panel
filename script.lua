@@ -49,7 +49,7 @@ local isnpc = function(ins)
 end
 
 -- ==========================================
--- СИСТЕМА КОНТРОЛЯ NPC (ADVANCED ALIGN & MODES)
+-- СИСТЕМА КОНТРОЛЯ NPC
 -- ==========================================
 
 local Controlling = false
@@ -57,7 +57,6 @@ local CurrentlyControlledNPC = nil
 local OriginalProperties = {}
 local DisposableInstances = {}
 local OriginalPosition
-local CurrentMode = 1 -- 1: Normal, 2: Killer
 
 local Connections = {}
 local ScreenGui
@@ -189,24 +188,8 @@ function StopControlling(restorePosition)
 	ClientVelocity.Enabled = false
 	ClientAlignOrientation.Enabled = false
 
-	if CurrentMode == 2 then
-		if Character then
-			SetCameraSubject(Humanoid)
-			Client.Character = Character
-		else
-			for _, Newchar in pairs(ws:GetDescendants()) do
-				if Newchar.Name == Client.Name then
-					Client.Character = Newchar
-					SetCameraSubject(Newchar:FindFirstChildOfClass("Humanoid"))
-					HumanoidRootPart = Newchar:FindFirstChild("HumanoidRootPart")
-					Humanoid = Newchar:FindFirstChildOfClass("Humanoid")
-				end
-			end
-		end
-	else
-		SetCameraSubject(Humanoid)
-		Client.Character = Character
-	end
+	SetCameraSubject(Humanoid)
+	Client.Character = Character
 
 	DummyAttachment.Parent = nil
 	NPCAttachment.Parent = nil
@@ -305,15 +288,9 @@ function Control(npcModel)
 		local dummyHumanoid = dummyModel:FindFirstChildOfClass("Humanoid")
 		local dummyRootPart = dummyModel:FindFirstChild(npcRootPart.Name)
 
-		if CurrentMode == 1 then
-			DummyDiedConnection = dummyHumanoid.Died:Once(function()
-				if Controlling then StopControlling(true) end
-			end)
-		else
-			DummyDiedConnection = dummyHumanoid.Died:Once(function()
-				if Controlling then Humanoid.Health = 0 end
-			end)
-		end
+		DummyDiedConnection = dummyHumanoid.Died:Once(function()
+			if Controlling then StopControlling(true) end
+		end)
 
 		local function updateHealth()
 			if Controlling then
@@ -382,7 +359,7 @@ rs.Heartbeat:Connect(function()
 	end
 
 	if NPCRootPart then
-		local offset = CurrentMode == 1 and 3 or 4
+		local offset = 6 -- Единое значение смещения под NPC
 		local npcPosition = NPCRootPart.Position
 		HumanoidRootPart.CFrame = CFrame.new(
 			npcPosition.X, npcPosition.Y - offset, npcPosition.Z
@@ -514,6 +491,75 @@ local function actionSteal()
     end
 end
 
+-- Функция поиска ближайшего игрока к заданной позиции или объекту
+local function getClosestPlayerToPosition(pos)
+    local closestPlayer = nil
+    local shortestDist = inf
+    for _, player in ipairs(plrs:GetPlayers()) do
+        if player ~= lp and player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - pos).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestPlayer = player
+                end
+            end
+        end
+    end
+    -- Если других игроков нет, возвращаем локального игрока
+    if not closestPlayer and lp.Character then
+        return lp
+    end
+    return closestPlayer
+end
+
+-- 1. Функция Агра выбранного NPC на ближайшего игрока
+local function actionAggroNPC()
+    if currentnpc then
+        local part = currentnpc:FindFirstChild("HumanoidRootPart")
+        local hum = currentnpc:FindFirstChildOfClass("Humanoid")
+        if part and hum and partowner(part) then
+            local targetPlayer = getClosestPlayerToPosition(part.Position)
+            if targetPlayer and targetPlayer.Character then
+                local targetHrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetHrp then
+                    hum:MoveTo(targetHrp.Position)
+                    light(currentnpc, Color3.fromRGB(255, 100, 0))
+                end
+            end
+        else
+            light(currentnpc, Color3.fromRGB(255, 0, 0))
+        end
+    end
+end
+
+-- 2. Функция Агра ВСЕХ ближайших NPC (в радиусе 50 студов) на ближайшего игрока
+local function actionAggroAllNPCs()
+    if lp and lp.Character then
+        local myHrp = lp.Character:FindFirstChild("HumanoidRootPart")
+        if not myHrp then return end
+        
+        local partsInRadius = ws:GetPartBoundsInRadius(myHrp.Position, 50)
+        for _, part in ipairs(partsInRadius) do
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model and isnpc(model) and model ~= lp.Character then
+                local hrp = model:FindFirstChild("HumanoidRootPart")
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and partowner(hrp) then
+                    local targetPlayer = getClosestPlayerToPosition(hrp.Position)
+                    if targetPlayer and targetPlayer.Character then
+                        local targetHrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if targetHrp then
+                            hum:MoveTo(targetHrp.Position)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function actionToggleControl()
     if Controlling then
         StopControlling(true)
@@ -588,7 +634,7 @@ local function actionHighlightControllableNPCs()
         end
 
         task.wait(0.7)
-        for _, hl in ipairs(activeHighlighters) do
+        for _, hl in ipairs(activeHighlighters) --[[@as any]] do
             hl:Destroy()
         end
 
@@ -703,7 +749,7 @@ KeybindGui.Parent = coreGui
 KeybindGui.Enabled = false
 
 local KeybindFrame = Instance.new("Frame")
-KeybindFrame.Size = UDim2.new(0, 220, 0, 195)
+KeybindFrame.Size = UDim2.new(0, 220, 0, 245)
 KeybindFrame.Position = UDim2.new(0, 20, 0, 150)
 KeybindFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 KeybindFrame.BorderSizePixel = 0
@@ -747,8 +793,10 @@ end
 createKeybindInfo("• Control NPC: C")
 createKeybindInfo("• Teleport to Mouse: Z")
 createKeybindInfo("• Bring NPC: B")
+createKeybindInfo("• Punish NPC: P")
 createKeybindInfo("• Steal Tool: T")
 createKeybindInfo("• Highlight NPCs: X")
+createKeybindInfo("• Aggro Selected NPC: V")
 
 -- ==========================================
 -- ВКЛАДКА MAIN
@@ -767,6 +815,11 @@ MainTab:CreateButton({
 MainTab:CreateButton({
     Name = "goto npc",
     Callback = function(...) pcall(actionGoto) end,
+})
+
+MainTab:CreateButton({
+    Name = "aggro selected npc",
+    Callback = function(...) pcall(actionAggroNPC) end,
 })
 
 MainTab:CreateToggle({
@@ -889,6 +942,11 @@ MainTab:CreateToggle({
 ExtraTab:CreateButton({
     Name = "bring all npcs",
     Callback = function(...) pcall(actionBringAll) end,
+})
+
+ExtraTab:CreateButton({
+    Name = "aggro all nearby npcs",
+    Callback = function(...) pcall(actionAggroAllNPCs) end,
 })
 
 ExtraTab:CreateToggle({
@@ -1066,6 +1124,16 @@ SettingsTab:CreateKeybind({
 })
 
 SettingsTab:CreateKeybind({
+    Name = "Punish NPC",
+    CurrentKeybind = "P",
+    HoldToInteract = false,
+    Flag = "PunishNPCKeybind",
+    Callback = function(...)
+        pcall(actionPunish)
+    end,
+})
+
+SettingsTab:CreateKeybind({
     Name = "Steal Tool",
     CurrentKeybind = "T",
     HoldToInteract = false,
@@ -1082,6 +1150,16 @@ SettingsTab:CreateKeybind({
     Flag = "HighlightNPCsKeybind",
     Callback = function(...)
         pcall(actionHighlightControllableNPCs)
+    end,
+})
+
+SettingsTab:CreateKeybind({
+    Name = "Aggro Selected NPC",
+    CurrentKeybind = "V",
+    HoldToInteract = false,
+    Flag = "AggroNPCKeybind",
+    Callback = function(...)
+        pcall(actionAggroNPC)
     end,
 })
 
