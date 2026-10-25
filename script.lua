@@ -1,7 +1,14 @@
 --1. rules: it is forbidden to change the credit name, this script was created by @carmo you will be charged dcma for changing the credit
 --2. rules: changing the code using AI and claiming it as your own is not allowed
 
-if carmonpcpanel then return end; carmonpcpanel = true
+-- Защита от повторного запуска: удаляем старое окно/интерфейс, если он уже был создан
+pcall(function()
+    for _, gui in ipairs(game:GetService("CoreGui"):GetChildren()) do
+        if gui.Name == "Obsidian" or gui.Name == "CarmoNPCPanel" then
+            gui:Destroy()
+        end
+    end
+end)
 
 local inf = math.huge
 local pi = math.pi
@@ -58,10 +65,7 @@ local OriginalProperties = {}
 local DisposableInstances = {}
 local OriginalPosition
 
-local Connections = {}
-local ScreenGui
 local ToggleEnabled = true
-
 local Client = lp
 local Character = Client.Character or Client.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
@@ -319,7 +323,7 @@ function Control(npcModel)
 		NPCAttachment.Parent = npcRootPart
 
 		NPCModel = npcModel
-		NPCRootPart = npcRootPart
+        NPCRootPart = npcRootPart
 		NPCName = npcModel.Name
 
 		NPCHighlighter = Instance.new("Highlight")
@@ -355,11 +359,11 @@ rs.Heartbeat:Connect(function()
 	if type(sethiddenproperty) == "function" then
 		pcall(function() sethiddenproperty(Client, "SimulationRadius", inf) end)
 	elseif type(setsimulationradius) == "function" then
-		pcall(function() setsimulationradius(inf) end)
+		setsimulationradius(inf)
 	end
 
 	if NPCRootPart then
-		local offset = 6 -- Единое значение смещения под NPC
+		local offset = 6
 		local npcPosition = NPCRootPart.Position
 		HumanoidRootPart.CFrame = CFrame.new(
 			npcPosition.X, npcPosition.Y - offset, npcPosition.Z
@@ -395,13 +399,24 @@ rs.Heartbeat:Connect(function()
 end)
 
 -- ==========================================
--- ФУНКЦИОНАЛ ДЕЙСТВИЙ С NPC
+-- ФУНКЦИОНАЛ ДЕЙСТВИЙ С NPC И ИГРОКОМ
 -- ==========================================
 
 local function actionKill()
     if currentnpc then
         local hum = currentnpc:FindFirstChildOfClass("Humanoid")
         if hum then hum.Health = 0 end
+    end
+end
+
+local function actionKillAll()
+    for _, model in ipairs(ws:GetDescendants()) do
+        if model:IsA("Model") and isnpc(model) and model ~= lp.Character then
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum.Health = 0
+            end
+        end
     end
 end
 
@@ -456,6 +471,70 @@ local function actionPunish()
     end
 end
 
+-- TPWalk 2 (скорость 40)
+local tpwalkEnabled = false
+local function actionTPWalk()
+    tpwalkEnabled = not tpwalkEnabled
+end
+
+rs.Heartbeat:Connect(function(dt)
+    if tpwalkEnabled and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") and lp.Character:FindFirstChildOfClass("Humanoid") then
+        local hum = lp.Character:FindFirstChildOfClass("Humanoid")
+        local hrp = lp.Character:FindFirstChild("HumanoidRootPart")
+        if hum.MoveDirection.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + (hum.MoveDirection * 40 * dt)
+        end
+    end
+end)
+
+-- Fly на букву F
+local flying = false
+local flySpeed = 50
+local bg, bv
+local function actionFly()
+    flying = not flying
+    local char = lp.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    
+    if flying then
+        if hum then hum.PlatformStand = true end
+        bg = Instance.new("BodyGyro", hrp)
+        bg.P = 9e4
+        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.cframe = hrp.CFrame
+        
+        bv = Instance.new("BodyVelocity", hrp)
+        bv.velocity = Vector3.new(0, 0, 0)
+        bv.maxForce = Vector3.new(9e9, 9e9, 9e9)
+        
+        task.spawn(function()
+            while flying and char and hrp and char.Parent do
+                local cam = ws.CurrentCamera
+                local moveDir = Vector3.new()
+                if uis:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + cam.CFrame.LookVector end
+                if uis:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - cam.CFrame.LookVector end
+                if uis:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - cam.CFrame.RightVector end
+                if uis:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + cam.CFrame.RightVector end
+                if uis:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+                if uis:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+                
+                bv.velocity = moveDir * flySpeed
+                bg.cframe = cam.CFrame
+                rs.RenderStepped:Wait()
+            end
+            if bg then bg:Destroy() end
+            if bv then bv:Destroy() end
+            if hum then hum.PlatformStand = false end
+        end)
+    else
+        if hum then hum.PlatformStand = false end
+        if bg then bg:Destroy() end
+        if bv then bv:Destroy() end
+    end
+end
+
 local function actionSit()
     if currentnpc then
         local part = currentnpc:FindFirstChild("HumanoidRootPart")
@@ -491,7 +570,6 @@ local function actionSteal()
     end
 end
 
--- Функция поиска ближайшего игрока к заданной позиции или объекту
 local function getClosestPlayerToPosition(pos)
     local closestPlayer = nil
     local shortestDist = inf
@@ -507,14 +585,12 @@ local function getClosestPlayerToPosition(pos)
             end
         end
     end
-    -- Если других игроков нет, возвращаем локального игрока
     if not closestPlayer and lp.Character then
         return lp
     end
     return closestPlayer
 end
 
--- 1. Функция Агра выбранного NPC на ближайшего игрока
 local function actionAggroNPC()
     if currentnpc then
         local part = currentnpc:FindFirstChild("HumanoidRootPart")
@@ -534,7 +610,6 @@ local function actionAggroNPC()
     end
 end
 
--- 2. Функция Агра ВСЕХ ближайших NPC (в радиусе 50 студов) на ближайшего игрока
 local function actionAggroAllNPCs()
     if lp and lp.Character then
         local myHrp = lp.Character:FindFirstChild("HumanoidRootPart")
@@ -634,7 +709,7 @@ local function actionHighlightControllableNPCs()
         end
 
         task.wait(0.7)
-        for _, hl in ipairs(activeHighlighters) --[[@as any]] do
+        for _, hl in ipairs(activeHighlighters) do
             hl:Destroy()
         end
 
@@ -643,191 +718,99 @@ local function actionHighlightControllableNPCs()
 end
 
 -- ==========================================
--- ИНИЦИАЛИЗАЦИЯ RAYFIELD UI
+-- ИНИЦИАЛИЗАЦИЯ ОБСИДИАНА
 -- ==========================================
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 
-local Window = Rayfield:CreateWindow({
-    Name = "Carmo NPC Panel",
-    ConfigurationSaving = {
-        Enabled = false
-    },
-    KeySystem = false,
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+local Window = Library:CreateWindow({
+    Title = "Carmo NPC Panel",
+    Icon = "rbxassetid://10734341457",
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
 })
 
-local MainTab = Window:CreateTab("main", 4483362458)
-local ExtraTab = Window:CreateTab("extra", 4483362458)
-local SettingsTab = Window:CreateTab("settings", 4483362458)
+local MainTab = Window:AddTab("Main", "rbxassetid://10723407389")
+local ExtraTab = Window:AddTab("Extra", "rbxassetid://10734950309")
+local SettingsTab = Window:AddTab("Settings", "rbxassetid://10734950309")
 
-local MainSection = MainTab:CreateSection("main")
-local ExtraSection = ExtraTab:CreateSection("extra & toggles")
-local SettingsSection = SettingsTab:CreateSection("appearance & keybinds")
+local MainGroup = MainTab:AddLeftGroupbox("NPC Actions")
+local MainTogglesGroup = MainTab:AddRightGroupbox("Toggles")
 
--- ==========================================
--- КАСТОМНЫЕ КНОПКИ И ИКОНКА
--- ==========================================
+local ExtraGroup = ExtraTab:AddLeftGroupbox("Global Actions")
+local ExtraTogglesGroup = ExtraTab:AddRightGroupbox("Auras & Network")
 
-local ScreenGuiRay = coreGui:FindFirstChild("Rayfield")
-if ScreenGuiRay then
-    local mainFrame = ScreenGuiRay:FindFirstChild("Main")
-    if mainFrame then
-        
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.Name = "CloseButton"
-        closeBtn.Size = UDim2.new(0, 28, 0, 28)
-        closeBtn.Position = UDim2.new(1, -35, 0, 10)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-        closeBtn.BorderSizePixel = 0
-        closeBtn.Text = "✕"
-        closeBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
-        closeBtn.TextSize = 14
-        closeBtn.Font = Enum.Font.SourceSansBold
-        closeBtn.Parent = mainFrame
+local KeybindsGroup = SettingsTab:AddLeftGroupbox("Keybinds & UI Settings")
+local UIManagementGroup = SettingsTab:AddRightGroupbox("UI Management")
 
-        local closeCorner = Instance.new("UICorner")
-        closeCorner.CornerRadius = UDim.new(0, 6)
-        closeCorner.Parent = closeBtn
-        
-        closeBtn.MouseButton1Click:Connect(function()
-            Rayfield:Destroy()
-            if KeybindGui then KeybindGui:Destroy() end
-            local foundIcon = coreGui:FindFirstChild("CarmoMinimizedIcon")
-            if foundIcon then foundIcon:Destroy() end
-        end)
-
-        local iconGui = Instance.new("ScreenGui")
-        iconGui.Name = "CarmoMinimizedIcon"
-        iconGui.Parent = coreGui
-        iconGui.Enabled = false
-
-        local iconButton = Instance.new("ImageButton")
-        iconButton.Size = UDim2.new(0, 55, 0, 55)
-        iconButton.Position = UDim2.new(0, 20, 0, 120)
-        iconButton.BackgroundTransparency = 1
-        iconButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        iconButton.Image = "rbxassetid://10734341457"
-        iconButton.ScaleType = Enum.ScaleType.Fit
-        iconButton.Active = true
-        iconButton.Draggable = true
-        iconButton.Parent = iconGui
-
-        local minimizeBtn = Instance.new("TextButton")
-        minimizeBtn.Name = "MinimizeButton"
-        minimizeBtn.Size = UDim2.new(0, 28, 0, 28)
-        minimizeBtn.Position = UDim2.new(1, -70, 0, 10)
-        minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-        minimizeBtn.BorderSizePixel = 0
-        minimizeBtn.Text = "-"
-        minimizeBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
-        minimizeBtn.TextSize = 18
-        minimizeBtn.Font = Enum.Font.SourceSansBold
-        minimizeBtn.Parent = mainFrame
-
-        local minCorner = Instance.new("UICorner")
-        minCorner.CornerRadius = UDim.new(0, 6)
-        minCorner.Parent = minimizeBtn
-
-        minimizeBtn.MouseButton1Click:Connect(function()
-            mainFrame.Visible = false
-            iconGui.Enabled = true
-        end)
-
-        iconButton.MouseButton1Click:Connect(function()
-            iconGui.Enabled = false
-            mainFrame.Visible = true
-        end)
-    end
+-- Активация Keybind Menu из документации
+Library.ShowToggleFrameInKeybinds = true
+if Library.KeybindFrame then
+    Library.KeybindFrame.Visible = true
 end
-
--- ==========================================
--- ПАНЕЛЬ КЕЙБИНДОВ НА ЭКРАНЕ
--- ==========================================
-local KeybindGui = Instance.new("ScreenGui")
-KeybindGui.Name = "CarmoKeybindsGui"
-KeybindGui.Parent = coreGui
-KeybindGui.Enabled = false
-
-local KeybindFrame = Instance.new("Frame")
-KeybindFrame.Size = UDim2.new(0, 220, 0, 245)
-KeybindFrame.Position = UDim2.new(0, 20, 0, 150)
-KeybindFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-KeybindFrame.BorderSizePixel = 0
-KeybindFrame.Parent = KeybindGui
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = KeybindFrame
-
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Color = Color3.fromRGB(75, 150, 255)
-UIStroke.Thickness = 2
-UIStroke.Parent = KeybindFrame
-
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, 0, 0, 30)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "ACTIVE KEYBINDS"
-TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleLabel.TextSize = 14
-TitleLabel.Font = Enum.Font.SourceSansBold
-TitleLabel.Parent = KeybindFrame
-
-local ListLayout = Instance.new("UIListLayout")
-ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.Parent = KeybindFrame
-
-local function createKeybindInfo(text)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -20, 0, 24)
-    lbl.Position = UDim2.new(0, 10, 0, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-    lbl.TextSize = 13
-    lbl.Font = Enum.Font.SourceSans
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = KeybindFrame
-end
-
-createKeybindInfo("• Control NPC: C")
-createKeybindInfo("• Teleport to Mouse: Z")
-createKeybindInfo("• Bring NPC: B")
-createKeybindInfo("• Punish NPC: P")
-createKeybindInfo("• Steal Tool: T")
-createKeybindInfo("• Highlight NPCs: X")
-createKeybindInfo("• Aggro Selected NPC: V")
 
 -- ==========================================
 -- ВКЛАДКА MAIN
 -- ==========================================
 
-MainTab:CreateButton({
-    Name = "kill npc",
-    Callback = function(...) pcall(actionKill) end,
+MainGroup:AddButton({
+    Text = "Kill NPC",
+    Func = function() pcall(actionKill) end
 })
 
-MainTab:CreateButton({
-    Name = "bring npc",
-    Callback = function(...) pcall(actionBring) end,
+MainGroup:AddButton({
+    Text = "Bring NPC",
+    Func = function() pcall(actionBring) end
 })
 
-MainTab:CreateButton({
-    Name = "goto npc",
-    Callback = function(...) pcall(actionGoto) end,
+MainGroup:AddButton({
+    Text = "Goto NPC",
+    Func = function() pcall(actionGoto) end
 })
 
-MainTab:CreateButton({
-    Name = "aggro selected npc",
-    Callback = function(...) pcall(actionAggroNPC) end,
+MainGroup:AddButton({
+    Text = "Aggro Selected NPC",
+    Func = function() pcall(actionAggroNPC) end
 })
 
-MainTab:CreateToggle({
-    Name = "control npc",
-    CurrentValue = false,
-    Flag = "ControlNPCToggle",
-    Callback = function(a)
-        if a then
+MainGroup:AddButton({
+    Text = "Punish NPC",
+    Func = function() pcall(actionPunish) end
+})
+
+MainGroup:AddButton({
+    Text = "TPWalk 2",
+    Func = function() pcall(actionTPWalk) end
+})
+
+MainGroup:AddButton({
+    Text = "NPC Sit State",
+    Func = function() pcall(actionSit) end
+})
+
+MainGroup:AddButton({
+    Text = "NPC Jump State",
+    Func = function() pcall(actionJump) end
+})
+
+MainGroup:AddButton({
+    Text = "Steal Tool",
+    Func = function() pcall(actionSteal) end
+})
+
+MainTogglesGroup:AddToggle("ControlNPC", {
+    Text = "Control NPC",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             if currentnpc then
                 local part = currentnpc:FindFirstChild("HumanoidRootPart")
                 if part and partowner(part) then
@@ -839,31 +822,15 @@ MainTab:CreateToggle({
         else
             StopControlling(true)
         end
-    end,
-})
-
-MainTab:CreateButton({
-    Name = "punish npc",
-    Callback = function(...) pcall(actionPunish) end,
-})
-
-MainTab:CreateButton({
-    Name = "npc sit state",
-    Callback = function(...) pcall(actionSit) end,
-})
-
-MainTab:CreateButton({
-    Name = "npc jump state",
-    Callback = function(...) pcall(actionJump) end,
+    end
 })
 
 local followCon
-MainTab:CreateToggle({
-    Name = "following npc",
-    CurrentValue = false,
-    Flag = "FollowingNPCToggle",
-    Callback = function(a)
-        if a then
+MainTogglesGroup:AddToggle("FollowNPC", {
+    Text = "Following NPC",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             followCon = rs.RenderStepped:Connect(function()
                 if currentnpc then
                     local part = currentnpc:FindFirstChild("HumanoidRootPart")
@@ -886,16 +853,15 @@ MainTab:CreateToggle({
         else
             if followCon then followCon:Disconnect(); followCon = nil end
         end
-    end,
+    end
 })
 
 local lookMouseCon
-MainTab:CreateToggle({
-    Name = "Look at Mouse",
-    CurrentValue = false,
-    Flag = "LookAtMouseToggle",
-    Callback = function(a)
-        if a then
+MainTogglesGroup:AddToggle("LookAtMouse", {
+    Text = "Look at Mouse",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             lookMouseCon = rs.Heartbeat:Connect(function()
                 if currentnpc then
                     local npcPart = currentnpc:FindFirstChild("HumanoidRootPart")
@@ -910,20 +876,14 @@ MainTab:CreateToggle({
         else
             if lookMouseCon then lookMouseCon:Disconnect(); lookMouseCon = nil end
         end
-    end,
+    end
 })
 
-MainTab:CreateButton({
-    Name = "Steal Tool",
-    Callback = function(...) pcall(actionSteal) end,
-})
-
-MainTab:CreateToggle({
-    Name = "Teleport to Mouse",
-    CurrentValue = false,
-    Flag = "TeleportToMouseToggle",
-    Callback = function(a)
-        if a then
+MainTogglesGroup:AddToggle("TeleportToMouse", {
+    Text = "Teleport to Mouse",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             if not IsTeleportingToMouse then
                 actionToggleTeleportToMouse()
             end
@@ -932,39 +892,37 @@ MainTab:CreateToggle({
                 actionToggleTeleportToMouse()
             end
         end
-    end,
+    end
 })
 
 -- ==========================================
 -- ВКЛАДКА EXTRA
 -- ==========================================
 
-ExtraTab:CreateButton({
-    Name = "bring all npcs",
-    Callback = function(...) pcall(actionBringAll) end,
+ExtraGroup:AddButton({
+    Text = "Bring All NPCs",
+    Func = function() pcall(actionBringAll) end
 })
 
-ExtraTab:CreateButton({
-    Name = "aggro all nearby npcs",
-    Callback = function(...) pcall(actionAggroAllNPCs) end,
+ExtraGroup:AddButton({
+    Text = "Aggro All Nearby NPCs",
+    Func = function() pcall(actionAggroAllNPCs) end
 })
 
-ExtraTab:CreateToggle({
-    Name = "disable click to control npc",
-    CurrentValue = false,
-    Flag = "DisableClickControlToggle",
-    Callback = function(v)
-        clicknpc = not v
-    end,
+ExtraTogglesGroup:AddToggle("DisableClickControl", {
+    Text = "Disable Click Control",
+    Default = false,
+    Callback = function(Value)
+        clicknpc = not Value
+    end
 })
 
 local netOwnerCon
-ExtraTab:CreateToggle({
-    Name = "show network ownership of npc with your network ownership",
-    CurrentValue = false,
-    Flag = "NetworkOwnerToggle",
-    Callback = function(a)
-        if a then
+ExtraTogglesGroup:AddToggle("NetworkOwner", {
+    Text = "Network Ownership Sync",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             netOwnerCon = rs.Heartbeat:Connect(function()
                 if currentnpc then
                     local part = currentnpc:FindFirstChild("HumanoidRootPart")
@@ -984,16 +942,15 @@ ExtraTab:CreateToggle({
         else
             if netOwnerCon then netOwnerCon:Disconnect(); netOwnerCon = nil end
         end
-    end,
+    end
 })
 
 local con1, con2
-ExtraTab:CreateToggle({
-    Name = "kill aura any npc",
-    CurrentValue = false,
-    Flag = "KillAuraToggle",
-    Callback = function(a)
-        if a then
+ExtraTogglesGroup:AddToggle("KillAura", {
+    Text = "Kill Aura",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             con1 = rs.Stepped:Connect(function()
                 local hrp1 = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
                 if not hrp1 then return end
@@ -1009,15 +966,14 @@ ExtraTab:CreateToggle({
         else
             if con1 then con1:Disconnect(); con1 = nil end
         end
-    end,
+    end
 })
 
-ExtraTab:CreateToggle({
-    Name = "jump aura any npc",
-    CurrentValue = false,
-    Flag = "JumpAuraToggle",
-    Callback = function(a)
-        if a then
+ExtraTogglesGroup:AddToggle("JumpAura", {
+    Text = "Jump Aura",
+    Default = false,
+    Callback = function(Value)
+        if Value then
             con2 = rs.Stepped:Connect(function()
                 local hrp1 = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
                 if not hrp1 then return end
@@ -1033,135 +989,148 @@ ExtraTab:CreateToggle({
         else
             if con2 then con2:Disconnect(); con2 = nil end
         end
-    end,
-})
-
--- ==========================================
--- ВКЛАДКА SETTINGS
--- ==========================================
-
-SettingsTab:CreateSection("Theme Color & Background")
-
-SettingsTab:CreateColorPicker({
-    Name = "UI Accent Color",
-    Color = Color3.fromRGB(75, 150, 255),
-    Flag = "UIThemeColor",
-    Callback = function(Value)
-        if not Value then return end
-        pcall(function()
-            for _, gui in ipairs(coreGui:GetDescendants()) do
-                if gui:IsA("UIStroke") then
-                    gui.Color = Value
-                elseif gui:IsA("TextLabel") and gui.TextColor3 ~= Color3.fromRGB(255, 255, 255) and gui.TextColor3 ~= Color3.fromRGB(240, 240, 240) then
-                    if gui.Parent and (gui.Parent.Name == "Title" or gui.Parent.Name == "TabButton" or gui.Parent.Name:lower():find("selected")) then
-                        gui.TextColor3 = Value
-                    end
-                elseif gui:IsA("Frame") and (gui.Name == "Selected" or gui.Name == "Indicator" or gui.Name == "Bar" or gui.Name == "Active") then
-                    gui.BackgroundColor3 = Value
-                end
-            end
-        end)
     end
 })
 
-SettingsTab:CreateInput({
-    Name = "Background Decal ID",
-    PlaceholderText = "Enter Decal ID or URL",
-    RemoveTextAfterFocusLost = false,
-    Flag = "BackgroundDecalInput",
-    Callback = function(Text)
-        pcall(function()
-            local assetId = tonumber(Text) or Text
-            if type(assetId) == "number" then
-                assetId = "rbxassetid://" .. tostring(assetId)
-            end
-            Window.Background = assetId
-        end)
-    end,
+-- ==========================================
+-- ВКЛАДКА SETTINGS (КЕЙБИНДЫ И УПРАВЛЕНИЕ UI)
+-- ==========================================
+
+KeybindsGroup:AddLabel("Control NPC"):AddKeyPicker("Bind_ControlNPC", {
+    Default = "C",
+    Mode = "Toggle",
+    NoUI = false,
+    Text = "Control NPC",
+    Callback = function() pcall(actionToggleControl) end
 })
 
-SettingsTab:CreateSection("HUD & Visuals")
-
-SettingsTab:CreateToggle({
-    Name = "Show Keybinds Overlay on Screen",
-    CurrentValue = false,
-    Flag = "ShowKeybindsOverlayToggle",
-    Callback = function(State)
-        KeybindGui.Enabled = State
-    end,
+KeybindsGroup:AddLabel("Teleport to Mouse"):AddKeyPicker("Bind_TPMouse", {
+    Default = "Z",
+    Mode = "Toggle",
+    NoUI = false,
+    Text = "Teleport to Mouse",
+    Callback = function() pcall(actionToggleTeleportToMouse) end
 })
 
-SettingsTab:CreateSection("All Functions Keybinds")
-
-SettingsTab:CreateKeybind({
-    Name = "Control NPC",
-    CurrentKeybind = "C",
-    HoldToInteract = false,
-    Flag = "ControlNPCKeybind",
-    Callback = function(...)
-        pcall(actionToggleControl)
-    end,
+KeybindsGroup:AddLabel("Fly"):AddKeyPicker("Bind_Fly", {
+    Default = "F",
+    Mode = "Toggle",
+    NoUI = false,
+    Text = "Fly",
+    Callback = function() pcall(actionFly) end
 })
 
-SettingsTab:CreateKeybind({
-    Name = "Teleport to Mouse",
-    CurrentKeybind = "Z",
-    HoldToInteract = false,
-    Flag = "TeleportToMouseKeybind",
-    Callback = function(...)
-        pcall(actionToggleTeleportToMouse)
-    end,
+KeybindsGroup:AddLabel("TPWalk 2"):AddKeyPicker("Bind_TPWalk", {
+    Default = "R",
+    Mode = "Toggle",
+    NoUI = false,
+    Text = "TPWalk 2",
+    Callback = function() pcall(actionTPWalk) end
 })
 
-SettingsTab:CreateKeybind({
-    Name = "Bring NPC",
-    CurrentKeybind = "B",
-    HoldToInteract = false,
-    Flag = "BringNPCKeybind",
-    Callback = function(...)
+KeybindsGroup:AddLabel("Bring NPC"):AddKeyPicker("Bind_BringNPC", {
+    Default = "B",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Bring NPC"
+})
+
+KeybindsGroup:AddLabel("Punish NPC"):AddKeyPicker("Bind_PunishNPC", {
+    Default = "P",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Punish NPC"
+})
+
+KeybindsGroup:AddLabel("Kill All NPCs"):AddKeyPicker("Bind_KillAll", {
+    Default = "G",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Kill All NPCs"
+})
+
+KeybindsGroup:AddLabel("Steal Tool"):AddKeyPicker("Bind_StealTool", {
+    Default = "T",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Steal Tool"
+})
+
+KeybindsGroup:AddLabel("Highlight NPCs"):AddKeyPicker("Bind_HighlightNPCs", {
+    Default = "X",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Highlight NPCs"
+})
+
+KeybindsGroup:AddLabel("Aggro Selected NPC"):AddKeyPicker("Bind_AggroNPC", {
+    Default = "V",
+    Mode = "Press",
+    NoUI = false,
+    Text = "Aggro Selected NPC"
+})
+
+KeybindsGroup:AddLabel("Toggle Menu"):AddKeyPicker("Bind_MenuToggle", {
+    Default = "RightShift",
+    Mode = "Toggle",
+    NoUI = true,
+    Text = "Toggle Menu"
+})
+
+Library.ToggleKeybind = Options.Bind_MenuToggle
+
+-- Нативная обработка удержания для кнопок в режиме Press
+rs.Heartbeat:Connect(function()
+    if uis:GetFocusedTextBox() then return end
+    
+    if Options.Bind_BringNPC and Options.Bind_BringNPC.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_BringNPC.Value]) then
         pcall(actionBring)
-    end,
-})
-
-SettingsTab:CreateKeybind({
-    Name = "Punish NPC",
-    CurrentKeybind = "P",
-    HoldToInteract = false,
-    Flag = "PunishNPCKeybind",
-    Callback = function(...)
+    end
+    if Options.Bind_PunishNPC and Options.Bind_PunishNPC.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_PunishNPC.Value]) then
         pcall(actionPunish)
-    end,
-})
-
-SettingsTab:CreateKeybind({
-    Name = "Steal Tool",
-    CurrentKeybind = "T",
-    HoldToInteract = false,
-    Flag = "StealToolKeybind",
-    Callback = function(...)
+    end
+    if Options.Bind_KillAll and Options.Bind_KillAll.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_KillAll.Value]) then
+        pcall(actionKillAll)
+    end
+    if Options.Bind_StealTool and Options.Bind_StealTool.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_StealTool.Value]) then
         pcall(actionSteal)
-    end,
-})
-
-SettingsTab:CreateKeybind({
-    Name = "Highlight Controllable NPCs",
-    CurrentKeybind = "X",
-    HoldToInteract = false,
-    Flag = "HighlightNPCsKeybind",
-    Callback = function(...)
+    end
+    if Options.Bind_HighlightNPCs and Options.Bind_HighlightNPCs.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_HighlightNPCs.Value]) then
         pcall(actionHighlightControllableNPCs)
-    end,
+    end
+    if Options.Bind_AggroNPC and Options.Bind_AggroNPC.Value and uis:IsKeyDown(Enum.KeyCode[Options.Bind_AggroNPC.Value]) then
+        pcall(actionAggroNPC)
+    end
+end)
+
+-- Дополнительные элементы управления UI из документации Obsidian
+UIManagementGroup:AddToggle("KeybindsOverlayToggle", {
+    Text = "Show Keybind Menu Overlay",
+    Default = true,
+    Callback = function(State)
+        if Library.KeybindFrame then
+            Library.KeybindFrame.Visible = State
+        end
+    end
 })
 
-SettingsTab:CreateKeybind({
-    Name = "Aggro Selected NPC",
-    CurrentKeybind = "V",
-    HoldToInteract = false,
-    Flag = "AggroNPCKeybind",
-    Callback = function(...)
-        pcall(actionAggroNPC)
-    end,
+UIManagementGroup:AddButton({
+    Text = "Unload UI",
+    Func = function()
+        Library:Unload()
+    end
 })
+
+-- Инициализация ThemeManager и SaveManager из документации Obsidian
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+ThemeManager:SetFolder("CarmoNPCPanel")
+SaveManager:SetFolder("CarmoNPCPanel/configs")
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+ThemeManager:ApplyToTab(SettingsTab)
+SaveManager:BuildConfigSection(SettingsTab)
+SaveManager:LoadAutoloadConfig()
 
 -- ==========================================
 -- ВЫБОР NPC МЫШКОЙ И СИМУЛЯЦИЯ
